@@ -44,6 +44,17 @@ class EmailSummarizer:
                 "summary_source": "error",
             }
 
+    def summarize_document(self, document: dict[str, Any]) -> str:
+        """Return a concise summary for a document record."""
+        content = str(document.get("content", "")).strip()
+        if not self.settings.groq_enabled:
+            return self._heuristic_document_summary(content)
+
+        try:
+            return self._groq_document_summary(document)
+        except Exception:
+            return self._heuristic_document_summary(content)
+
     def _groq_summary(self, emails: list[EmailMessage]) -> str:
         """Run the ChatGroq summarization chain."""
         from langchain_core.output_parsers import StrOutputParser
@@ -75,3 +86,48 @@ class EmailSummarizer:
         )
         chain = prompt | self._llm | StrOutputParser()
         return chain.invoke({"email_digest": email_digest})
+
+    def _groq_document_summary(self, document: dict[str, Any]) -> str:
+        """Run the ChatGroq summarization chain for a single document."""
+        from langchain_core.output_parsers import StrOutputParser
+        from langchain_core.prompts import ChatPromptTemplate
+        from langchain_groq import ChatGroq
+
+        if self._llm is None:
+            self._llm = ChatGroq(
+                api_key=self.settings.groq_api_key,
+                model=self.settings.groq_model,
+                temperature=0.2,
+            )
+
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    "You are an email and document intelligence assistant. "
+                    "Summarize the document for a busy operator in 2-3 concise sentences.",
+                ),
+                (
+                    "human",
+                    "Document name: {name}\nMime type: {mime_type}\nOwner: {owner}\n\nContent:\n{content}",
+                ),
+            ]
+        )
+        chain = prompt | self._llm | StrOutputParser()
+        return chain.invoke(
+            {
+                "name": document.get("name", "Untitled"),
+                "mime_type": document.get("mime_type", "unknown"),
+                "owner": document.get("owner", "Unknown owner"),
+                "content": str(document.get("content", ""))[:6000],
+            }
+        )
+
+    @staticmethod
+    def _heuristic_document_summary(content: str) -> str:
+        """Return a local document summary when Groq is unavailable."""
+        compact = " ".join(content.split())
+        if not compact:
+            return "No extractable document content was found."
+        suffix = "..." if len(compact) > 200 else ""
+        return f"{compact[:200]}{suffix}"

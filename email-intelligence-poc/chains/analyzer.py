@@ -15,6 +15,7 @@ class EmailAnalyzer:
 
     VALID_SENTIMENTS = {"positive", "negative", "neutral"}
     VALID_PRIORITIES = {"high", "medium", "low"}
+    VALID_DOCUMENT_TYPES = {"report", "memo", "proposal", "notes", "other"}
 
     def __init__(self, settings: Settings) -> None:
         """Create an analyzer configured for Groq or local fallback mode."""
@@ -36,6 +37,18 @@ class EmailAnalyzer:
     def analyze_emails(self, emails: list[EmailMessage]) -> list[dict[str, Any]]:
         """Analyze multiple emails and return one dict per message."""
         return [self.analyze_email(message) for message in emails]
+
+    def analyze_document(self, document: dict[str, Any]) -> dict[str, Any]:
+        """Analyze a single document and return structured Python data."""
+        if not self.settings.groq_enabled:
+            return self._heuristic_document_analysis(document)
+
+        try:
+            return self._groq_document_analysis(document)
+        except Exception as exc:
+            fallback = self._heuristic_document_analysis(document)
+            fallback["llm_error"] = str(exc)
+            return fallback
 
     def _groq_analysis(self, email: EmailMessage) -> dict[str, Any]:
         """Run ChatGroq extraction and normalize the JSON response."""
@@ -121,6 +134,75 @@ class EmailAnalyzer:
             "analysis_source": "heuristic",
         }
 
+    def _groq_document_analysis(self, document: dict[str, Any]) -> dict[str, Any]:
+        """Run ChatGroq extraction for a document and normalize the JSON response."""
+        from langchain_core.prompts import ChatPromptTemplate
+        from langchain_groq import ChatGroq
+
+        if self._llm is None:
+            self._llm = ChatGroq(
+                api_key=self.settings.groq_api_key,
+                model=self.settings.groq_model,
+                temperature=0,
+            )
+
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    "You analyze business documents. Return only valid JSON with keys: "
+                    "summary, key_topics, document_type. key_topics must be a list of "
+                    "short strings. document_type must be one of: report, memo, proposal, "
+                    "notes, other.",
+                ),
+                (
+                    "human",
+                    "Name: {name}\nMime type: {mime_type}\nOwner: {owner}\nContent:\n{content}",
+                ),
+            ]
+        )
+        response = (prompt | self._llm).invoke(
+            {
+                "name": document.get("name", "Untitled"),
+                "mime_type": document.get("mime_type", "unknown"),
+                "owner": document.get("owner", "Unknown owner"),
+                "content": str(document.get("content", ""))[:6000],
+            }
+        )
+        content = getattr(response, "content", str(response))
+        parsed = self._parse_json_response(content)
+        return self._normalize_document_analysis(parsed, document, source="groq")
+
+    def _heuristic_document_analysis(self, document: dict[str, Any]) -> dict[str, Any]:
+        """Analyze a document locally when Groq is not configured or fails."""
+        content = str(document.get("content", ""))
+        text = f"{document.get('name', '')} {content}".lower()
+        topic_terms = {
+            "security": {"security", "incident", "audit", "logging", "escalation"},
+            "finance": {"finance", "invoice", "revenue", "spend", "budget", "renewal"},
+            "product": {"product", "roadmap", "prototype", "onboarding", "mobile"},
+            "customer": {"customer", "customers", "churn", "support", "accounts"},
+            "operations": {"operations", "workflow", "staffing", "process", "month-end"},
+            "analytics": {"analytics", "dashboards", "instrumentation", "reporting"},
+            "hiring": {"hiring", "interview", "engineering", "data science"},
+        }
+
+        key_topics = [
+            topic
+            for topic, terms in topic_terms.items()
+            if any(self._contains_term(text, term) for term in terms)
+        ]
+        if not key_topics:
+            key_topics = ["general"]
+
+        return {
+            "summary": self._short_summary(content),
+            "key_topics": key_topics[:5],
+            "document_type": self._infer_document_type(text),
+            "word_count": len(content.split()),
+            "analysis_source": "heuristic",
+        }
+
     @staticmethod
     def _contains_term(text: str, term: str) -> bool:
         """Return whether text contains a whole-word term or phrase."""
@@ -157,3 +239,48 @@ class EmailAnalyzer:
             "top_topics": clean_topics[:5] or ["general"],
             "analysis_source": source,
         }
+
+    def _normalize_document_analysis(
+        self,
+        parsed: dict[str, Any],
+        document: dict[str, Any],
+        source: str,
+    ) -> dict[str, Any]:
+        """Normalize document analysis output into stable chart-friendly values."""
+        content = str(document.get("content", ""))
+        summary = str(parsed.get("summary", "")).strip() or self._short_summary(content)
+        topics = parsed.get("key_topics", [])
+        document_type = str(parsed.get("document_type", "other")).strip().lower()
+        if not isinstance(topics, list):
+            topics = [str(topics)]
+        clean_topics = [str(topic).strip().lower() for topic in topics if str(topic).strip()]
+        if document_type not in self.VALID_DOCUMENT_TYPES:
+            document_type = "other"
+        return {
+            "summary": summary,
+            "key_topics": clean_topics[:5] or ["general"],
+            "document_type": document_type,
+            "word_count": len(content.split()),
+            "analysis_source": source,
+        }
+
+    def _infer_document_type(self, text: str) -> str:
+        """Infer a coarse business document type from a name and content."""
+        if self._contains_term(text, "proposal"):
+            return "proposal"
+        if self._contains_term(text, "report") or self._contains_term(text, "review"):
+            return "report"
+        if self._contains_term(text, "memo"):
+            return "memo"
+        if self._contains_term(text, "notes"):
+            return "notes"
+        return "other"
+
+    @staticmethod
+    def _short_summary(content: str, max_length: int = 200) -> str:
+        """Return a compact local summary from document content."""
+        compact = " ".join(content.split())
+        if not compact:
+            return "No extractable document content was found."
+        suffix = "..." if len(compact) > max_length else ""
+        return f"{compact[:max_length]}{suffix}"

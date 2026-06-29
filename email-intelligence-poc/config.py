@@ -21,6 +21,7 @@ class Settings(BaseModel):
     email_use_ssl: bool = Field(default=True)
     groq_api_key: Optional[str] = Field(default=None)
     groq_model: str = Field(default="llama-3.1-8b-instant")
+    gdrive_folder_id: Optional[str] = Field(default=None)
     output_dir: Path = Field(default=Path("output"))
 
     @property
@@ -48,5 +49,6 @@ def load_settings(env_file: str | Path = ".env") -> Settings:
         email_use_ssl=_parse_bool(os.getenv("EMAIL_USE_SSL"), default=True),
         groq_api_key=os.getenv("GROQ_API_KEY"),
         groq_model=os.getenv("GROQ_MODEL", "llama-3.1-8b-instant"),
+        gdrive_folder_id=os.getenv("GDRIVE_FOLDER_ID"),
         output_dir=Path(os.getenv("OUTPUT_DIR", "output")),
     )

@@ -26,3 +26,5 @@ uv.lock
 .idea/
 *.swp
 .DS_Store
+credentials.json
+token.json

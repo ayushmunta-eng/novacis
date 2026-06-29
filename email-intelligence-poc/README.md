@@ -132,6 +132,39 @@ EMAIL_USER=your_email@gmail.com
 EMAIL_PASSWORD=your_app_password
 ```
 
+## Phase 2: Google Drive Integration
+
+The POC can also analyze Google Drive documents with the same Groq-backed intelligence flow.
+
+### Google Drive setup
+
+1. Go to [console.cloud.google.com](https://console.cloud.google.com/).
+2. Create a new project.
+3. Enable the Google Drive API.
+4. Go to APIs & Services > Credentials > Create Credentials > OAuth 2.0 Client ID.
+5. Set application type to "Desktop App".
+6. Download the JSON and save it as `credentials.json` in the project root.
+7. First run will open a browser to authenticate. After that, `token.json` handles it automatically.
+8. Optionally set `GDRIVE_FOLDER_ID` in `.env` to limit analysis to a specific folder.
+
+`credentials.json` and `token.json` are gitignored and must never be committed.
+
+### Run Google Drive document analysis
+
+```bash
+python main.py --docs
+```
+
+### Run with mock document data
+
+Mock document mode needs no Google credentials:
+
+```bash
+python main.py --docs-mock
+```
+
+Document outputs are written to `output/raw_documents.json`, `output/analyzed_documents.json`, and document charts under `output/charts/`.
+
 ## Outputs
 
 The app writes generated files to `output/`:
