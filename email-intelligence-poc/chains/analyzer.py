@@ -90,8 +90,8 @@ class EmailAnalyzer:
             "ai": {"ai", "artificial intelligence", "research"},
         }
 
-        positive_score = sum(term in text for term in positive_terms)
-        negative_score = sum(term in text for term in negative_terms)
+        positive_score = sum(self._contains_term(text, term) for term in positive_terms)
+        negative_score = sum(self._contains_term(text, term) for term in negative_terms)
         if positive_score > negative_score:
             sentiment = "positive"
         elif negative_score > positive_score:
@@ -99,9 +99,9 @@ class EmailAnalyzer:
         else:
             sentiment = "neutral"
 
-        if any(term in text for term in high_terms):
+        if any(self._contains_term(text, term) for term in high_terms):
             priority = "high"
-        elif any(term in text for term in medium_terms):
+        elif any(self._contains_term(text, term) for term in medium_terms):
             priority = "medium"
         else:
             priority = "low"
@@ -109,7 +109,7 @@ class EmailAnalyzer:
         topics = [
             topic
             for topic, terms in topic_terms.items()
-            if any(term in text for term in terms)
+            if any(self._contains_term(text, term) for term in terms)
         ]
         if not topics:
             topics = ["general"]
@@ -120,6 +120,11 @@ class EmailAnalyzer:
             "top_topics": topics[:5],
             "analysis_source": "heuristic",
         }
+
+    @staticmethod
+    def _contains_term(text: str, term: str) -> bool:
+        """Return whether text contains a whole-word term or phrase."""
+        return re.search(rf"\b{re.escape(term)}\b", text) is not None
 
     def _parse_json_response(self, content: str) -> dict[str, Any]:
         """Parse a model response that should contain JSON."""
