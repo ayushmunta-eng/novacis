@@ -268,12 +268,12 @@ class EmailAnalyzer:
         """Infer a coarse business document type from a name and content."""
         if self._contains_term(text, "proposal"):
             return "proposal"
+        if self._contains_term(text, "notes"):
+            return "notes"
         if self._contains_term(text, "report") or self._contains_term(text, "review"):
             return "report"
         if self._contains_term(text, "memo"):
             return "memo"
-        if self._contains_term(text, "notes"):
-            return "notes"
         return "other"
 
     @staticmethod
